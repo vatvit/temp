@@ -621,26 +621,16 @@ def save_combined_results(all_results):
         база_no_date_sum = sum(safe_float(d['sale']['price']) for d in r['база_no_date'])
         date_anomaly_sum = sum(safe_float(d['sale']['price']) for d in r['date_anomaly'])
 
-        # Sum of matched items with date issues - compare with gap to see how much is explained
-        # Note: POTENTIAL is not included because those items are already counted above
+        # Sum of all items that might explain the gap
+        # Priority: date issues > tolerance (if gap exists)
+        tolerance_sum = sum(safe_float(t['sale']['price']) for t in r['tolerance_applied'])
         issues_sum = wrong_date_sum + база_no_date_sum + date_anomaly_sum
 
-        # If gap exists but no date issues, suggest checking TOLERANCE matches
-        tolerance_sum = sum(safe_float(t['sale']['price']) for t in r['tolerance_applied'])
-
-        # NOT_FOUND and БАЗА_EXTRA sums
-        not_found_sum = sum(safe_float(s['price']) for s in r['not_found'])
-        база_extra_sum = sum(safe_float(b['price']) for b in r['база_unmatched'])
-
-        # Build check_items hint
+        # Build check_items - just a number to compare with gap
         if issues_sum > 0:
             check_hint = round(issues_sum, 2)
         elif abs(gap) > 0.01 and tolerance_sum > 0:
-            # Gap exists but no date issues - show TOLERANCE sum with marker
-            check_hint = f"T:{round(tolerance_sum, 2)}"
-        elif abs(gap) > 0.01:
-            # Gap exists but nothing obvious - show NOT_FOUND vs БАЗА_EXTRA
-            check_hint = f"NF:{round(not_found_sum, 2)}/БE:{round(база_extra_sum, 2)}"
+            check_hint = round(tolerance_sum, 2)
         else:
             check_hint = ''
 
@@ -813,7 +803,7 @@ def save_combined_results(all_results):
             "• expected_diff - ожидаемая разница (sold_tovar - sold_база)",
             "• computed_diff - вычисленная разница по позициям",
             "• gap - расхождение (если не 0, значит есть проблемы)",
-            "• check_items - сумма проблемных позиций (T:xxx = проверьте TOLERANCE)",
+            "• check_items - сумма проблемных позиций (сравните с gap)",
             "• matched - сколько позиций совпало",
             "• tolerance - совпало с допуском (опечатки в году, прочерк вместо пустого и т.д.)",
             "• wrong_date - совпало, но дата продажи отличается (в пределах 1 мес.)",
