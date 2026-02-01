@@ -4,10 +4,33 @@ Excel Analysis - Compare tovar vs база for all months
 """
 
 import pandas as pd
+import re
 from pathlib import Path
 from datetime import datetime
 
 pd.set_option('display.max_columns', 8)
+
+# Cyrillic to Latin lookalike character mapping (lowercase)
+# These characters look identical but have different Unicode code points
+CYRILLIC_TO_LATIN = {
+    'а': 'a', 'в': 'b', 'с': 'c', 'е': 'e', 'к': 'k',
+    'м': 'm', 'н': 'h', 'о': 'o', 'р': 'p', 'т': 't',
+    'х': 'x', 'у': 'y'
+}
+
+
+def normalize_string_for_comparison(s):
+    """Normalize string for comparison: lowercase, replace Cyrillic lookalikes, normalize whitespace."""
+    if s is None or pd.isna(s):
+        return ''
+    if not isinstance(s, str):
+        s = str(s)
+    result = s.lower()
+    for cyr, lat in CYRILLIC_TO_LATIN.items():
+        result = result.replace(cyr, lat)
+    # Normalize whitespace: trim and collapse multiple spaces
+    result = re.sub(r'\s+', ' ', result.strip())
+    return result
 pd.set_option('display.max_rows', 20)
 pd.set_option('display.width', 150)
 
@@ -263,12 +286,14 @@ def find_in_база(sale, база_sheets):
     4. Empty date (last resort)
     """
     name = sale['name']
+    name_normalized = normalize_string_for_comparison(name)
     sale_key = normalize_tuple(sale['cols_a_h'])
     tovar_date = sale['sell_date']
     matches = []
 
     for sheet_name, df in база_sheets.items():
-        mask = df[0] == name
+        # Use normalized comparison for product names (handles Cyrillic/Latin lookalikes)
+        mask = df[0].apply(lambda x: normalize_string_for_comparison(x) == name_normalized)
         if not mask.any():
             continue
 
@@ -299,12 +324,14 @@ def find_in_база(sale, база_sheets):
 def find_potential_matches(sale, база_sheets):
     """Find база rows with same name and sell date, but A-H too different."""
     name = sale['name']
+    name_normalized = normalize_string_for_comparison(name)
     sell_date = sale['sell_date']
     sale_key = normalize_tuple(sale['cols_a_h'])
     potentials = []
 
     for sheet_name, df in база_sheets.items():
-        mask = df[0] == name
+        # Use normalized comparison for product names (handles Cyrillic/Latin lookalikes)
+        mask = df[0].apply(lambda x: normalize_string_for_comparison(x) == name_normalized)
         if not mask.any():
             continue
 
