@@ -940,8 +940,8 @@
             return potentials;
         }
 
-        // Process month
-        function processMonth(monthConfig, tovarWorkbook, bazaSheets) {
+        // Process month - async version with progress callback
+        async function processMonth(monthConfig, tovarWorkbook, bazaSheets, onProgress) {
             const { sheetName, colIdx, monthNum, monthName } = monthConfig;
 
             const { soldTovar, soldBaza, diff: expectedDiff } = getMonthDifference(tovarWorkbook, colIdx);
@@ -959,7 +959,16 @@
             const bazaNoDate = [];
             const usedBaza = new Set();
 
+            const totalSales = sales.length;
+            let processedSales = 0;
+
             for (const sale of sales) {
+                // Yield every 50 items to prevent UI freeze
+                if (processedSales % 50 === 0) {
+                    if (onProgress) onProgress(processedSales, totalSales);
+                    await new Promise(r => setTimeout(r, 0));
+                }
+                processedSales++;
                 const matches = findInBaza(sale, bazaSheets);
 
                 if (!matches.length) {
@@ -1097,8 +1106,11 @@
         }
 
         async function runAnalysis() {
+            btnAnalyze.disabled = true;
+            btnAnalyze.innerHTML = '<span class="spinner" style="width:1rem;height:1rem;margin-right:0.5rem;display:inline-block;vertical-align:middle;"></span>Обработка...';
             progressEl.classList.add('visible');
             progressFill.style.width = '0%';
+            progressFill.style.background = 'var(--primary)';
             progressText.textContent = 'Загрузка данных...';
 
             await new Promise(r => setTimeout(r, 50));
@@ -1120,10 +1132,14 @@
                 for (const monthConfig of MONTHS) {
                     if (!availableSheets.includes(monthConfig.sheetName)) continue;
 
-                    progressText.textContent = `Обработка: ${monthConfig.monthName}...`;
-                    await new Promise(r => setTimeout(r, 10));
+                    const onProgress = (current, total) => {
+                        progressText.textContent = `${monthConfig.monthName}: ${current}/${total} позиций...`;
+                    };
 
-                    const result = processMonth(monthConfig, tovarWorkbook, bazaSheets);
+                    progressText.textContent = `Обработка: ${monthConfig.monthName}...`;
+                    await new Promise(r => setTimeout(r, 0));
+
+                    const result = await processMonth(monthConfig, tovarWorkbook, bazaSheets, onProgress);
                     if (result) {
                         allResults.push(result);
                         collectIssues(result);
@@ -1146,12 +1162,16 @@
                     progressEl.classList.remove('visible');
                     resultsEl.classList.add('visible');
                     btnDownload.style.display = 'inline-flex';
+                    btnAnalyze.innerHTML = 'Анализировать';
+                    btnAnalyze.disabled = false;
                 }, 500);
 
             } catch (error) {
                 console.error('Analysis error:', error);
                 progressText.textContent = `Ошибка: ${error.message}`;
                 progressFill.style.background = '#dc2626';
+                btnAnalyze.innerHTML = 'Анализировать';
+                btnAnalyze.disabled = false;
             }
         }
 
