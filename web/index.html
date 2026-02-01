@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel Comparison Tool</title>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --success: #16a34a;
+            --warning: #ca8a04;
+            --danger: #dc2626;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --text-muted: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        h1 {
+            font-size: 1.75rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            color: var(--text);
+        }
+
+        .drop-zone-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 768px) {
+            .drop-zone-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            background: var(--card-bg);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .drop-zone:hover {
+            border-color: var(--primary);
+            background: #f1f5f9;
+        }
+
+        .drop-zone.dragover {
+            border-color: var(--primary);
+            background: #dbeafe;
+        }
+
+        .drop-zone.loaded {
+            border-color: var(--success);
+            background: #f0fdf4;
+        }
+
+        .drop-zone h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .drop-zone p {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .drop-zone .filename {
+            margin-top: 0.75rem;
+            font-weight: 500;
+            color: var(--success);
+        }
+
+        .drop-zone input[type="file"] {
+            display: none;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.75rem 1.5rem;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--primary-dark);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #15803d;
+        }
+
+        .actions {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .progress-container {
+            display: none;
+            margin-bottom: 2rem;
+        }
+
+        .progress-container.visible {
+            display: block;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--primary);
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .progress-text {
+            margin-top: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .results {
+            display: none;
+        }
+
+        .results.visible {
+            display: block;
+        }
+
+        .summary-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .summary-card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+        }
+
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+
+        .summary-table th,
+        .summary-table td {
+            padding: 0.75rem 0.5rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .summary-table th {
+            font-weight: 600;
+            background: #f8fafc;
+            position: sticky;
+            top: 0;
+        }
+
+        .summary-table td {
+            font-variant-numeric: tabular-nums;
+        }
+
+        .summary-table tr:hover td {
+            background: #f8fafc;
+        }
+
+        .gap-positive {
+            color: var(--danger);
+            font-weight: 600;
+        }
+
+        .gap-negative {
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        .gap-zero {
+            color: var(--text-muted);
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0.25rem;
+            border-bottom: 2px solid var(--border);
+            margin-bottom: 1rem;
+            overflow-x: auto;
+        }
+
+        .tab {
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            background: none;
+            border: none;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            white-space: nowrap;
+        }
+
+        .tab:hover {
+            color: var(--text);
+        }
+
+        .tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .tab .badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.25rem;
+            height: 1.25rem;
+            padding: 0 0.375rem;
+            margin-left: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: var(--border);
+            border-radius: 9999px;
+        }
+
+        .tab.active .badge {
+            background: var(--primary);
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .details-table-container {
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .details-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+        }
+
+        .details-table th,
+        .details-table td {
+            padding: 0.625rem 0.5rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .details-table th {
+            font-weight: 600;
+            background: #f8fafc;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .details-table tr:hover td {
+            background: #f8fafc;
+        }
+
+        .type-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .type-TOLERANCE { background: #dbeafe; color: #1d4ed8; }
+        .type-WRONG_DATE { background: #fef3c7; color: #b45309; }
+        .type-DATE_ANOMALY { background: #fee2e2; color: #b91c1c; }
+        .type-БАЗА_NO_DATE { background: #fce7f3; color: #be185d; }
+        .type-POTENTIAL { background: #e9d5ff; color: #7c3aed; }
+        .type-NOT_FOUND { background: #fecaca; color: #dc2626; }
+        .type-БАЗА_EXTRA { background: #fed7aa; color: #c2410c; }
+
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        .spinner {
+            width: 2rem;
+            height: 2rem;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .month-filter {
+            margin-bottom: 1rem;
+        }
+
+        .month-filter select {
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: white;
+        }
+
+        .info-text {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            padding: 1rem;
+            background: #f8fafc;
+            border-radius: 8px;
+        }
+
+        .help-section {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .help-section h3 {
+            font-size: 1rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .help-section ul {
+            list-style: none;
+            font-size: 0.875rem;
+        }
+
+        .help-section li {
+            margin-bottom: 0.5rem;
+            padding-left: 1.25rem;
+            position: relative;
+        }
+
+        .help-section li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0.5rem;
+            width: 0.5rem;
+            height: 0.5rem;
+            border-radius: 50%;
+        }
+
+        .help-section li.help-tolerance::before { background: #2563eb; }
+        .help-section li.help-wrong::before { background: #ca8a04; }
+        .help-section li.help-anomaly::before { background: #dc2626; }
+        .help-section li.help-nodate::before { background: #db2777; }
+        .help-section li.help-potential::before { background: #7c3aed; }
+        .help-section li.help-notfound::before { background: #dc2626; }
+        .help-section li.help-extra::before { background: #c2410c; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Excel Comparison Tool</h1>
+
+        <div class="drop-zone-container">
+            <div class="drop-zone" id="dropTovar">
+                <h3>tovar2025_PRN.xlsx</h3>
+                <p>Перетащите файл сюда или нажмите для выбора</p>
+                <div class="filename" id="tovarFilename"></div>
+                <input type="file" id="inputTovar" accept=".xlsx,.xls">
+            </div>
+
+            <div class="drop-zone" id="dropBaza">
+                <h3>База товара_PRN.xls</h3>
+                <p>Перетащите файл сюда или нажмите для выбора</p>
+                <div class="filename" id="bazaFilename"></div>
+                <input type="file" id="inputBaza" accept=".xlsx,.xls">
+            </div>
+        </div>
+
+        <div class="actions">
+            <button class="btn btn-primary" id="btnAnalyze" disabled>Анализировать</button>
+            <button class="btn btn-success" id="btnDownload" style="display: none;">Скачать Excel</button>
+        </div>
+
+        <div class="progress-container" id="progress">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressText">Загрузка...</div>
+        </div>
+
+        <div class="results" id="results">
+            <div class="summary-card">
+                <h2>Сводка по месяцам</h2>
+                <div class="info-text">
+                    <strong>gap</strong> = expected_diff - computed_diff. Если gap = 0, все расхождения объяснены.<br>
+                    <strong>check_items</strong> = сумма позиций WRONG_DATE + DATE_ANOMALY + БАЗА_NO_DATE (могут объяснять gap)
+                </div>
+                <div class="details-table-container">
+                    <table class="summary-table" id="summaryTable">
+                        <thead>
+                            <tr>
+                                <th>Месяц</th>
+                                <th>sold_tovar</th>
+                                <th>sold_база</th>
+                                <th>expected_diff</th>
+                                <th>computed_diff</th>
+                                <th>gap</th>
+                                <th>check_items</th>
+                                <th>matched</th>
+                                <th>tolerance</th>
+                                <th>wrong_date</th>
+                                <th>date_anomaly</th>
+                                <th>база_no_date</th>
+                                <th>potential</th>
+                                <th>not_found</th>
+                                <th>база_extra</th>
+                            </tr>
+                        </thead>
+                        <tbody id="summaryBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="summary-card">
+                <h2>Детали</h2>
+                <div class="month-filter">
+                    <select id="monthFilter">
+                        <option value="">Все месяцы</option>
+                    </select>
+                </div>
+                <div class="tabs" id="tabs">
+                    <button class="tab active" data-tab="all">Все<span class="badge" id="badgeAll">0</span></button>
+                    <button class="tab" data-tab="TOLERANCE">TOLERANCE<span class="badge" id="badgeTOLERANCE">0</span></button>
+                    <button class="tab" data-tab="WRONG_DATE">WRONG_DATE<span class="badge" id="badgeWRONG_DATE">0</span></button>
+                    <button class="tab" data-tab="DATE_ANOMALY">DATE_ANOMALY<span class="badge" id="badgeDATE_ANOMALY">0</span></button>
+                    <button class="tab" data-tab="БАЗА_NO_DATE">БАЗА_NO_DATE<span class="badge" id="badgeБАЗА_NO_DATE">0</span></button>
+                    <button class="tab" data-tab="POTENTIAL">POTENTIAL<span class="badge" id="badgePOTENTIAL">0</span></button>
+                    <button class="tab" data-tab="NOT_FOUND">NOT_FOUND<span class="badge" id="badgeNOT_FOUND">0</span></button>
+                    <button class="tab" data-tab="БАЗА_EXTRA">БАЗА_EXTRA<span class="badge" id="badgeБАЗА_EXTRA">0</span></button>
+                </div>
+                <div class="details-table-container">
+                    <table class="details-table" id="detailsTable">
+                        <thead>
+                            <tr>
+                                <th>Месяц</th>
+                                <th>Тип</th>
+                                <th>tovar строка</th>
+                                <th>Наименование</th>
+                                <th>Цена H</th>
+                                <th>tovar дата</th>
+                                <th>база лист</th>
+                                <th>база строка</th>
+                                <th>база дата</th>
+                                <th>Проблема</th>
+                            </tr>
+                        </thead>
+                        <tbody id="detailsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="help-section">
+                <h3>Типы проблем:</h3>
+                <ul>
+                    <li class="help-tolerance"><strong>TOLERANCE</strong> - совпало с допуском (опечатки в году, прочерк/пусто)</li>
+                    <li class="help-wrong"><strong>WRONG_DATE</strong> - дата продажи отличается (в пределах 1 месяца)</li>
+                    <li class="help-anomaly"><strong>DATE_ANOMALY</strong> - даты отличаются на несколько месяцев (подозрительно!)</li>
+                    <li class="help-nodate"><strong>БАЗА_NO_DATE</strong> - совпало, но в Базе пустая дата (главная причина gap!)</li>
+                    <li class="help-potential"><strong>POTENTIAL</strong> - возможное совпадение (то же название и дата, но колонки A-H отличаются)</li>
+                    <li class="help-notfound"><strong>NOT_FOUND</strong> - позиция из tovar не найдена в Базе</li>
+                    <li class="help-extra"><strong>БАЗА_EXTRA</strong> - позиция в Базе с датой этого месяца не найдена в tovar</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let tovarWorkbook = null;
+        let bazaWorkbook = null;
+        let allResults = [];
+        let allIssues = [];
+
+        // Month configuration
+        const MONTHS = [
+            { sheetName: 'Январь продажи', colIdx: 1, monthNum: 1, monthName: 'Январь' },
+            { sheetName: 'Февраль продажи', colIdx: 2, monthNum: 2, monthName: 'Февраль' },
+            { sheetName: 'Март продажи', colIdx: 3, monthNum: 3, monthName: 'Март' },
+            { sheetName: 'Апрель продажи', colIdx: 4, monthNum: 4, monthName: 'Апрель' },
+            { sheetName: 'Май продажи', colIdx: 5, monthNum: 5, monthName: 'Май' },
+            { sheetName: 'Июнь продажи', colIdx: 6, monthNum: 6, monthName: 'Июнь' },
+            { sheetName: 'Июль продажи', colIdx: 7, monthNum: 7, monthName: 'Июль' },
+            { sheetName: 'Август продажи', colIdx: 8, monthNum: 8, monthName: 'Август' },
+            { sheetName: 'Сентябрь продажи', colIdx: 9, monthNum: 9, monthName: 'Сентябрь' },
+            { sheetName: 'Октябрь продажи', colIdx: 10, monthNum: 10, monthName: 'Октябрь' },
+            { sheetName: 'Ноябрь продажи', colIdx: 11, monthNum: 11, monthName: 'Ноябрь' },
+            { sheetName: 'Декабрь продажи', colIdx: 12, monthNum: 12, monthName: 'Декабрь' },
+        ];
+
+        // DOM elements
+        const dropTovar = document.getElementById('dropTovar');
+        const dropBaza = document.getElementById('dropBaza');
+        const inputTovar = document.getElementById('inputTovar');
+        const inputBaza = document.getElementById('inputBaza');
+        const tovarFilename = document.getElementById('tovarFilename');
+        const bazaFilename = document.getElementById('bazaFilename');
+        const btnAnalyze = document.getElementById('btnAnalyze');
+        const btnDownload = document.getElementById('btnDownload');
+        const progressEl = document.getElementById('progress');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const resultsEl = document.getElementById('results');
+
+        // Set up drop zones
+        [dropTovar, dropBaza].forEach((zone, idx) => {
+            const input = idx === 0 ? inputTovar : inputBaza;
+
+            zone.addEventListener('click', () => input.click());
+
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('dragover');
+            });
+
+            zone.addEventListener('dragleave', () => {
+                zone.classList.remove('dragover');
+            });
+
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file) handleFile(file, idx === 0 ? 'tovar' : 'baza');
+            });
+        });
+
+        inputTovar.addEventListener('change', (e) => {
+            if (e.target.files[0]) handleFile(e.target.files[0], 'tovar');
+        });
+
+        inputBaza.addEventListener('change', (e) => {
+            if (e.target.files[0]) handleFile(e.target.files[0], 'baza');
+        });
+
+        async function handleFile(file, type) {
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+
+            if (type === 'tovar') {
+                tovarWorkbook = workbook;
+                tovarFilename.textContent = file.name;
+                dropTovar.classList.add('loaded');
+            } else {
+                bazaWorkbook = workbook;
+                bazaFilename.textContent = file.name;
+                dropBaza.classList.add('loaded');
+            }
+
+            btnAnalyze.disabled = !(tovarWorkbook && bazaWorkbook);
+        }
+
+        btnAnalyze.addEventListener('click', runAnalysis);
+        btnDownload.addEventListener('click', downloadExcel);
+
+        // Utility functions
+        function isNaN_or_null(val) {
+            return val === null || val === undefined || (typeof val === 'number' && isNaN(val));
+        }
+
+        function isEmptyEquivalent(val) {
+            if (val === null || val === undefined) return true;
+            if (typeof val === 'number' && isNaN(val)) return true;
+            if (typeof val === 'string' && ['' , '-', '\u2014', '\u2013'].includes(val.trim())) return true;
+            return false;
+        }
+
+        function normalizeValue(v) {
+            if (v === null || v === undefined) return null;
+            if (typeof v === 'number') {
+                if (isNaN(v)) return null;
+                return Math.round(v * 10000) / 10000;
+            }
+            return v;
+        }
+
+        function normalizeTuple(arr) {
+            return arr.map(normalizeValue);
+        }
+
+        function isDate(val) {
+            return val instanceof Date && !isNaN(val.getTime());
+        }
+
+        function sameDate(d1, d2) {
+            if (!isDate(d1) || !isDate(d2)) return false;
+            return d1.getFullYear() === d2.getFullYear() &&
+                   d1.getMonth() === d2.getMonth() &&
+                   d1.getDate() === d2.getDate();
+        }
+
+        function formatDate(d) {
+            if (!isDate(d)) return '';
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            return `${day}.${month}.${year}`;
+        }
+
+        function formatVal(v) {
+            if (isNaN_or_null(v)) return 'empty';
+            if (isDate(v)) return formatDate(v);
+            const s = String(v);
+            return s.length > 12 ? s.substring(0, 12) : s;
+        }
+
+        function safeFloat(v) {
+            if (isNaN_or_null(v)) return 0;
+            const n = parseFloat(v);
+            return isNaN(n) ? 0 : n;
+        }
+
+        function getSheetData(workbook, sheetName) {
+            const sheet = workbook.Sheets[sheetName];
+            if (!sheet) return null;
+            return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: false, dateNF: 'yyyy-mm-dd' });
+        }
+
+        function getSheetDataRaw(workbook, sheetName) {
+            const sheet = workbook.Sheets[sheetName];
+            if (!sheet) return null;
+            // Use raw: true to get dates as Date objects
+            return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+        }
+
+        // Match with tolerance (columns A-H)
+        function matchWithTolerance(saleKey, rowKey) {
+            // Check exact match first
+            let exactMatch = true;
+            for (let i = 0; i < 8; i++) {
+                const s = normalizeValue(saleKey[i]);
+                const r = normalizeValue(rowKey[i]);
+                if (s !== r && !(s === null && r === null)) {
+                    exactMatch = false;
+                    break;
+                }
+            }
+            if (exactMatch) return { match: true, tolerances: [] };
+
+            const tolerances = [];
+            let hardMismatches = 0;
+            const mismatchCols = [];
+
+            for (let i = 0; i < 8; i++) {
+                const s = saleKey[i];
+                const r = rowKey[i];
+                const sn = normalizeValue(s);
+                const rn = normalizeValue(r);
+
+                if (sn === rn) continue;
+                if (sn === null && rn === null) continue;
+
+                // Column B (index 1) - year typo in date
+                if (i === 1 && isDate(s) && isDate(r)) {
+                    if (s.getMonth() === r.getMonth() && s.getDate() === r.getDate() && s.getFullYear() !== r.getFullYear()) {
+                        tolerances.push(`col_B_year:${s.getFullYear()}vs${r.getFullYear()}`);
+                        continue;
+                    }
+                }
+
+                // Dash/empty equivalence
+                if (isEmptyEquivalent(s) && isEmptyEquivalent(r)) {
+                    tolerances.push(`col${i}_dash_vs_empty`);
+                    continue;
+                }
+
+                hardMismatches++;
+                mismatchCols.push(i);
+                tolerances.push(`col${i}_diff:${formatVal(s)}vs${formatVal(r)}`);
+            }
+
+            // Special case: F (col 5) and H (col 7) differ = single price difference
+            if (hardMismatches === 2 && mismatchCols.includes(5) && mismatchCols.includes(7) && mismatchCols.length === 2) {
+                const newTol = tolerances.filter(t => !t.startsWith('col5_diff') && !t.startsWith('col7_diff'));
+                newTol.push(`price_diff:F=${formatVal(saleKey[5])}vs${formatVal(rowKey[5])},H=${formatVal(saleKey[7])}vs${formatVal(rowKey[7])}`);
+                return { match: true, tolerances: newTol };
+            }
+
+            if (hardMismatches > 1) return { match: false, tolerances: [] };
+
+            return { match: true, tolerances };
+        }
+
+        // Check date match
+        function checkDateMatch(date1, date2) {
+            if (sameDate(date1, date2)) return { match: true, tolerances: [], gap: 0 };
+            if (!isDate(date1) || !isDate(date2)) return { match: false, tolerances: [], gap: null };
+
+            const monthGap = Math.abs((date1.getFullYear() - date2.getFullYear()) * 12 + (date1.getMonth() - date2.getMonth()));
+
+            // Exact day match but different year (typo)
+            if (date1.getMonth() === date2.getMonth() && date1.getDate() === date2.getDate() && date1.getFullYear() !== date2.getFullYear()) {
+                return { match: true, tolerances: [`col_V_year:${date1.getFullYear()}vs${date2.getFullYear()}`], gap: monthGap };
+            }
+
+            // Same month tolerance
+            if (date1.getFullYear() === date2.getFullYear() && date1.getMonth() === date2.getMonth()) {
+                return { match: true, tolerances: [`same_month:${date1.getDate()}vs${date2.getDate()}`], gap: 0 };
+            }
+
+            return { match: false, tolerances: [], gap: monthGap };
+        }
+
+        // Score date match
+        function scoreDateMatch(tovarDate, bazaDate) {
+            if (!isDate(bazaDate)) return 1;
+            if (!isDate(tovarDate)) return 2;
+            if (sameDate(tovarDate, bazaDate)) return 4;
+            if (tovarDate.getFullYear() === bazaDate.getFullYear() && tovarDate.getMonth() === bazaDate.getMonth()) return 3;
+            return 2;
+        }
+
+        // Get mismatches list
+        function getMismatches(saleKey, rowKey) {
+            const cols = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+            const mismatches = [];
+            for (let i = 0; i < 8; i++) {
+                const s = saleKey[i];
+                const r = rowKey[i];
+                const sn = normalizeValue(s);
+                const rn = normalizeValue(r);
+                if (sn === rn) continue;
+                if (sn === null && rn === null) continue;
+                if (isEmptyEquivalent(s) && isEmptyEquivalent(r)) continue;
+                mismatches.push(`${cols[i]}:${formatVal(s)}vs${formatVal(r)}`);
+            }
+            return mismatches;
+        }
+
+        // Load база sheets
+        function loadBazaSheets(workbook) {
+            const skip = ['КупиПродай', 'Курс'];
+            const sheets = {};
+            for (const name of workbook.SheetNames) {
+                if (skip.includes(name)) continue;
+                const data = getSheetDataRaw(workbook, name);
+                if (data && data.length > 2) {
+                    sheets[name] = data.slice(2); // Skip first 2 rows
+                }
+            }
+            return sheets;
+        }
+
+        // Load month sales
+        function loadMonthSales(workbook, sheetName) {
+            const data = getSheetDataRaw(workbook, sheetName);
+            if (!data) return [];
+
+            const sales = [];
+            let currentDay = null;
+
+            for (let idx = 0; idx < data.length; idx++) {
+                const row = data[idx];
+                const valA = row[0];
+                const valV = row[21];
+
+                if (valA === null || valA === undefined || valA === 'Наименование товара') continue;
+
+                if (isDate(valA)) {
+                    currentDay = valA;
+                    continue;
+                }
+
+                sales.push({
+                    row: idx + 1,
+                    name: valA,
+                    colsAH: row.slice(0, 8),
+                    price: row[7],
+                    sellDate: valV,
+                    dayMarker: currentDay
+                });
+            }
+
+            return sales;
+        }
+
+        // Get month difference from КупиПродай
+        function getMonthDifference(workbook, colIdx) {
+            const data = getSheetDataRaw(workbook, 'КупиПродай');
+            if (!data || data.length < 10) return { soldTovar: null, soldBaza: null, diff: null };
+
+            try {
+                const soldTovar = safeFloat(data[8][colIdx]);
+                const soldBaza = safeFloat(data[9][colIdx]);
+                if (isNaN(soldTovar) || isNaN(soldBaza)) return { soldTovar: null, soldBaza: null, diff: null };
+                return { soldTovar, soldBaza, diff: soldTovar - soldBaza };
+            } catch (e) {
+                return { soldTovar: null, soldBaza: null, diff: null };
+            }
+        }
+
+        // Find in база
+        function findInBaza(sale, bazaSheets) {
+            const name = sale.name;
+            const saleKey = normalizeTuple(sale.colsAH);
+            const tovarDate = sale.sellDate;
+            const matches = [];
+
+            for (const [sheetName, data] of Object.entries(bazaSheets)) {
+                for (let idx = 0; idx < data.length; idx++) {
+                    const row = data[idx];
+                    if (row[0] !== name) continue;
+
+                    const rowKey = normalizeTuple(row.slice(0, 8));
+                    const result = matchWithTolerance(saleKey, rowKey);
+
+                    if (result.match) {
+                        const bazaDate = row[21];
+                        const dateScore = scoreDateMatch(tovarDate, bazaDate);
+                        matches.push({
+                            sheet: sheetName,
+                            row: idx + 3,
+                            colsAH: rowKey,
+                            price: row[7],
+                            sellDate: bazaDate,
+                            tolerances: result.tolerances,
+                            dateScore
+                        });
+                    }
+                }
+            }
+
+            matches.sort((a, b) => b.dateScore - a.dateScore);
+            return matches;
+        }
+
+        // Find potential matches
+        function findPotentialMatches(sale, bazaSheets) {
+            const name = sale.name;
+            const sellDate = sale.sellDate;
+            const saleKey = normalizeTuple(sale.colsAH);
+            const potentials = [];
+
+            for (const [sheetName, data] of Object.entries(bazaSheets)) {
+                for (let idx = 0; idx < data.length; idx++) {
+                    const row = data[idx];
+                    if (row[0] !== name) continue;
+
+                    const rowSellDate = row[21];
+                    const dateResult = checkDateMatch(sellDate, rowSellDate);
+                    if (!dateResult.match) continue;
+
+                    const rowKey = normalizeTuple(row.slice(0, 8));
+                    const matchResult = matchWithTolerance(saleKey, rowKey);
+                    if (matchResult.match) continue;
+
+                    const mismatches = getMismatches(saleKey, rowKey);
+                    potentials.push({
+                        sheet: sheetName,
+                        row: idx + 3,
+                        colsAH: rowKey,
+                        price: row[7],
+                        sellDate: rowSellDate,
+                        mismatches
+                    });
+                }
+            }
+
+            return potentials;
+        }
+
+        // Process month
+        function processMonth(monthConfig, tovarWorkbook, bazaSheets) {
+            const { sheetName, colIdx, monthNum, monthName } = monthConfig;
+
+            const { soldTovar, soldBaza, diff: expectedDiff } = getMonthDifference(tovarWorkbook, colIdx);
+            if (expectedDiff === null) return null;
+
+            const sales = loadMonthSales(tovarWorkbook, sheetName);
+            if (!sales.length) return null;
+
+            const matched = [];
+            const wrongDate = [];
+            const dateAnomaly = [];
+            const notFound = [];
+            const toleranceApplied = [];
+            const potentialMatches = [];
+            const bazaNoDate = [];
+            const usedBaza = new Set();
+
+            for (const sale of sales) {
+                const matches = findInBaza(sale, bazaSheets);
+
+                if (!matches.length) {
+                    const potential = findPotentialMatches(sale, bazaSheets);
+                    if (potential.length) {
+                        notFound.push(sale);
+                        for (const p of potential) {
+                            potentialMatches.push({ sale, baza: p, mismatches: p.mismatches });
+                        }
+                    } else {
+                        notFound.push(sale);
+                    }
+                    continue;
+                }
+
+                let foundMatch = false;
+
+                for (const m of matches) {
+                    const key = `${m.sheet}:${m.row}`;
+                    if (usedBaza.has(key)) continue;
+
+                    const dateResult = checkDateMatch(sale.sellDate, m.sellDate);
+                    if (dateResult.match) {
+                        usedBaza.add(key);
+                        const allTol = [...m.tolerances, ...dateResult.tolerances];
+                        matched.push({ sale, baza: m });
+                        if (allTol.length) {
+                            toleranceApplied.push({ sale, baza: m, tolerances: allTol });
+                        }
+                        foundMatch = true;
+                        break;
+                    }
+                }
+
+                if (!foundMatch) {
+                    for (const m of matches) {
+                        const key = `${m.sheet}:${m.row}`;
+                        if (usedBaza.has(key)) continue;
+
+                        usedBaza.add(key);
+                        const bazaDateEmpty = !isDate(m.sellDate);
+
+                        if (bazaDateEmpty) {
+                            bazaNoDate.push({
+                                sale, baza: m,
+                                tovarDate: sale.sellDate,
+                                bazaDate: m.sellDate
+                            });
+                        } else {
+                            const dateResult = checkDateMatch(sale.sellDate, m.sellDate);
+                            if (dateResult.gap !== null && dateResult.gap > 1) {
+                                dateAnomaly.push({
+                                    sale, baza: m,
+                                    tovarDate: sale.sellDate,
+                                    bazaDate: m.sellDate,
+                                    monthsApart: dateResult.gap
+                                });
+                            } else {
+                                wrongDate.push({
+                                    sale, baza: m,
+                                    tovarDate: sale.sellDate,
+                                    bazaDate: m.sellDate
+                                });
+                            }
+                        }
+
+                        if (m.tolerances.length) {
+                            toleranceApplied.push({ sale, baza: m, tolerances: m.tolerances });
+                        }
+
+                        const potential = findPotentialMatches(sale, bazaSheets);
+                        for (const p of potential) {
+                            const pKey = `${p.sheet}:${p.row}`;
+                            if (!usedBaza.has(pKey)) {
+                                potentialMatches.push({ sale, baza: p, mismatches: p.mismatches });
+                            }
+                        }
+                        foundMatch = true;
+                        break;
+                    }
+
+                    if (!foundMatch) {
+                        wrongDate.push({
+                            sale, baza: matches[0],
+                            tovarDate: sale.sellDate,
+                            bazaDate: 'ALL_USED'
+                        });
+                    }
+                }
+            }
+
+            // Find база items with this month's dates NOT matched
+            const bazaUnmatched = [];
+            for (const [sheetName, data] of Object.entries(bazaSheets)) {
+                for (let idx = 0; idx < data.length; idx++) {
+                    const row = data[idx];
+                    const sellDate = row[21];
+                    if (!isDate(sellDate)) continue;
+                    if (sellDate.getFullYear() === 2025 && sellDate.getMonth() + 1 === monthNum) {
+                        const key = `${sheetName}:${idx + 3}`;
+                        if (!usedBaza.has(key)) {
+                            bazaUnmatched.push({
+                                sheet: sheetName,
+                                row: idx + 3,
+                                name: row[0],
+                                price: row[7],
+                                date: sellDate
+                            });
+                        }
+                    }
+                }
+            }
+
+            const notFoundSum = notFound.reduce((sum, s) => sum + safeFloat(s.price), 0);
+            const unmatchedSum = bazaUnmatched.reduce((sum, b) => sum + safeFloat(b.price), 0);
+            const computedDiff = notFoundSum - unmatchedSum;
+
+            return {
+                month: monthName,
+                monthNum,
+                soldTovar,
+                soldBaza,
+                expectedDiff,
+                computedDiff,
+                matched,
+                wrongDate,
+                dateAnomaly,
+                bazaNoDate,
+                notFound,
+                toleranceApplied,
+                potentialMatches,
+                bazaUnmatched,
+                usedBaza
+            };
+        }
+
+        async function runAnalysis() {
+            progressEl.classList.add('visible');
+            progressFill.style.width = '0%';
+            progressText.textContent = 'Загрузка данных...';
+
+            await new Promise(r => setTimeout(r, 50));
+
+            try {
+                const bazaSheets = loadBazaSheets(bazaWorkbook);
+                progressFill.style.width = '10%';
+                progressText.textContent = `Загружено ${Object.keys(bazaSheets).length} листов из Базы`;
+
+                await new Promise(r => setTimeout(r, 50));
+
+                allResults = [];
+                allIssues = [];
+
+                const availableSheets = tovarWorkbook.SheetNames;
+                const totalMonths = MONTHS.filter(m => availableSheets.includes(m.sheetName)).length;
+                let processed = 0;
+
+                for (const monthConfig of MONTHS) {
+                    if (!availableSheets.includes(monthConfig.sheetName)) continue;
+
+                    progressText.textContent = `Обработка: ${monthConfig.monthName}...`;
+                    await new Promise(r => setTimeout(r, 10));
+
+                    const result = processMonth(monthConfig, tovarWorkbook, bazaSheets);
+                    if (result) {
+                        allResults.push(result);
+                        collectIssues(result);
+                    }
+
+                    processed++;
+                    progressFill.style.width = `${10 + (processed / totalMonths) * 80}%`;
+                }
+
+                progressFill.style.width = '95%';
+                progressText.textContent = 'Формирование отчета...';
+                await new Promise(r => setTimeout(r, 50));
+
+                displayResults();
+
+                progressFill.style.width = '100%';
+                progressText.textContent = 'Готово!';
+
+                setTimeout(() => {
+                    progressEl.classList.remove('visible');
+                    resultsEl.classList.add('visible');
+                    btnDownload.style.display = 'inline-flex';
+                }, 500);
+
+            } catch (error) {
+                console.error('Analysis error:', error);
+                progressText.textContent = `Ошибка: ${error.message}`;
+                progressFill.style.background = '#dc2626';
+            }
+        }
+
+        function collectIssues(result) {
+            const month = result.month;
+
+            for (const t of result.toleranceApplied) {
+                allIssues.push({
+                    month,
+                    type: 'TOLERANCE',
+                    tovarRow: t.sale.row,
+                    tovarName: t.sale.name,
+                    tovarPrice: t.sale.price,
+                    tovarSellDate: formatDate(t.sale.sellDate),
+                    bazaSheet: t.baza.sheet,
+                    bazaRow: t.baza.row,
+                    bazaSellDate: formatDate(t.baza.sellDate),
+                    issue: t.tolerances.join(', ')
+                });
+            }
+
+            for (const d of result.wrongDate) {
+                allIssues.push({
+                    month,
+                    type: 'WRONG_DATE',
+                    tovarRow: d.sale.row,
+                    tovarName: d.sale.name,
+                    tovarPrice: d.sale.price,
+                    tovarSellDate: formatDate(d.tovarDate),
+                    bazaSheet: d.baza.sheet,
+                    bazaRow: d.baza.row,
+                    bazaSellDate: d.bazaDate === 'ALL_USED' ? 'ALL_USED' : formatDate(d.bazaDate),
+                    issue: `tovar:${formatDate(d.tovarDate)} vs база:${d.bazaDate === 'ALL_USED' ? 'ALL_USED' : formatDate(d.bazaDate)}`
+                });
+            }
+
+            for (const d of result.bazaNoDate) {
+                allIssues.push({
+                    month,
+                    type: 'БАЗА_NO_DATE',
+                    tovarRow: d.sale.row,
+                    tovarName: d.sale.name,
+                    tovarPrice: d.sale.price,
+                    tovarSellDate: formatDate(d.tovarDate),
+                    bazaSheet: d.baza.sheet,
+                    bazaRow: d.baza.row,
+                    bazaSellDate: '(пусто)',
+                    issue: `tovar:${formatDate(d.tovarDate)} matched to база with EMPTY date`
+                });
+            }
+
+            for (const d of result.dateAnomaly) {
+                allIssues.push({
+                    month,
+                    type: 'DATE_ANOMALY',
+                    tovarRow: d.sale.row,
+                    tovarName: d.sale.name,
+                    tovarPrice: d.sale.price,
+                    tovarSellDate: formatDate(d.tovarDate),
+                    bazaSheet: d.baza.sheet,
+                    bazaRow: d.baza.row,
+                    bazaSellDate: formatDate(d.bazaDate),
+                    issue: `${d.monthsApart} мес. разница! tovar:${formatDate(d.tovarDate)} vs база:${formatDate(d.bazaDate)}`
+                });
+            }
+
+            for (const p of result.potentialMatches) {
+                allIssues.push({
+                    month,
+                    type: 'POTENTIAL',
+                    tovarRow: p.sale.row,
+                    tovarName: p.sale.name,
+                    tovarPrice: p.sale.price,
+                    tovarSellDate: formatDate(p.sale.sellDate),
+                    bazaSheet: p.baza.sheet,
+                    bazaRow: p.baza.row,
+                    bazaSellDate: formatDate(p.baza.sellDate),
+                    issue: p.mismatches.slice(0, 4).join(', ')
+                });
+            }
+
+            for (const s of result.notFound) {
+                const hasPotential = result.potentialMatches.some(p => p.sale.row === s.row);
+                if (hasPotential) continue;
+                allIssues.push({
+                    month,
+                    type: 'NOT_FOUND',
+                    tovarRow: s.row,
+                    tovarName: s.name,
+                    tovarPrice: s.price,
+                    tovarSellDate: formatDate(s.sellDate),
+                    bazaSheet: '',
+                    bazaRow: '',
+                    bazaSellDate: '',
+                    issue: 'Not found in база'
+                });
+            }
+
+            for (const b of result.bazaUnmatched) {
+                const nameStr = b.name ? String(b.name).substring(0, 40) : '';
+                allIssues.push({
+                    month,
+                    type: 'БАЗА_EXTRA',
+                    tovarRow: '',
+                    tovarName: '',
+                    tovarPrice: '',
+                    tovarSellDate: '',
+                    bazaSheet: b.sheet,
+                    bazaRow: b.row,
+                    bazaSellDate: formatDate(b.date),
+                    issue: `${nameStr} H=${b.price}`
+                });
+            }
+        }
+
+        function displayResults() {
+            // Summary table
+            const summaryBody = document.getElementById('summaryBody');
+            summaryBody.innerHTML = '';
+
+            for (const r of allResults) {
+                const gap = r.expectedDiff - r.computedDiff;
+                const wrongDateSum = r.wrongDate.reduce((s, d) => s + safeFloat(d.sale.price), 0);
+                const bazaNoDateSum = r.bazaNoDate.reduce((s, d) => s + safeFloat(d.sale.price), 0);
+                const dateAnomalySum = r.dateAnomaly.reduce((s, d) => s + safeFloat(d.sale.price), 0);
+                const issuesSum = wrongDateSum + bazaNoDateSum + dateAnomalySum;
+
+                let checkHint = '';
+                if (issuesSum > 0) {
+                    checkHint = issuesSum.toFixed(2);
+                } else if (Math.abs(gap) > 0.01) {
+                    const toleranceSum = r.toleranceApplied.reduce((s, t) => s + safeFloat(t.sale.price), 0);
+                    if (toleranceSum > 0) checkHint = toleranceSum.toFixed(2);
+                }
+
+                let gapClass = 'gap-zero';
+                if (gap > 0.01) gapClass = 'gap-positive';
+                else if (gap < -0.01) gapClass = 'gap-negative';
+
+                summaryBody.innerHTML += `
+                    <tr>
+                        <td>${r.month}</td>
+                        <td>${r.soldTovar.toFixed(2)}</td>
+                        <td>${r.soldBaza.toFixed(2)}</td>
+                        <td>${r.expectedDiff.toFixed(2)}</td>
+                        <td>${r.computedDiff.toFixed(2)}</td>
+                        <td class="${gapClass}">${gap.toFixed(2)}</td>
+                        <td>${checkHint}</td>
+                        <td>${r.matched.length}</td>
+                        <td>${r.toleranceApplied.length}</td>
+                        <td>${r.wrongDate.length}</td>
+                        <td>${r.dateAnomaly.length}</td>
+                        <td>${r.bazaNoDate.length}</td>
+                        <td>${r.potentialMatches.length}</td>
+                        <td>${r.notFound.length}</td>
+                        <td>${r.bazaUnmatched.length}</td>
+                    </tr>
+                `;
+            }
+
+            // Populate month filter
+            const monthFilter = document.getElementById('monthFilter');
+            monthFilter.innerHTML = '<option value="">Все месяцы</option>';
+            for (const r of allResults) {
+                monthFilter.innerHTML += `<option value="${r.month}">${r.month}</option>`;
+            }
+
+            // Update badges
+            const types = ['TOLERANCE', 'WRONG_DATE', 'DATE_ANOMALY', 'БАЗА_NO_DATE', 'POTENTIAL', 'NOT_FOUND', 'БАЗА_EXTRA'];
+            document.getElementById('badgeAll').textContent = allIssues.length;
+            for (const type of types) {
+                const count = allIssues.filter(i => i.type === type).length;
+                const badge = document.getElementById(`badge${type}`);
+                if (badge) badge.textContent = count;
+            }
+
+            // Display details
+            displayDetails();
+
+            // Set up tab handlers
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    displayDetails();
+                });
+            });
+
+            monthFilter.addEventListener('change', displayDetails);
+        }
+
+        function displayDetails() {
+            const activeTab = document.querySelector('.tab.active').dataset.tab;
+            const selectedMonth = document.getElementById('monthFilter').value;
+
+            let filtered = allIssues;
+
+            if (activeTab !== 'all') {
+                filtered = filtered.filter(i => i.type === activeTab);
+            }
+
+            if (selectedMonth) {
+                filtered = filtered.filter(i => i.month === selectedMonth);
+            }
+
+            const detailsBody = document.getElementById('detailsBody');
+            detailsBody.innerHTML = '';
+
+            for (const issue of filtered) {
+                detailsBody.innerHTML += `
+                    <tr>
+                        <td>${issue.month}</td>
+                        <td><span class="type-badge type-${issue.type}">${issue.type}</span></td>
+                        <td>${issue.tovarRow}</td>
+                        <td title="${issue.tovarName || ''}">${(issue.tovarName || '').substring(0, 30)}</td>
+                        <td>${safeFloat(issue.tovarPrice).toFixed(2)}</td>
+                        <td>${issue.tovarSellDate}</td>
+                        <td>${issue.bazaSheet}</td>
+                        <td>${issue.bazaRow}</td>
+                        <td>${issue.bazaSellDate}</td>
+                        <td title="${issue.issue}">${(issue.issue || '').substring(0, 50)}</td>
+                    </tr>
+                `;
+            }
+        }
+
+        function downloadExcel() {
+            const wb = XLSX.utils.book_new();
+
+            // Summary sheet
+            const summaryData = [
+                ['Месяц', 'sold_tovar', 'sold_база', 'expected_diff', 'computed_diff', 'gap', 'check_items',
+                 'matched', 'tolerance', 'wrong_date', 'date_anomaly', 'база_no_date', 'potential', 'not_found', 'база_extra']
+            ];
+
+            for (const r of allResults) {
+                const gap = r.expectedDiff - r.computedDiff;
+                const wrongDateSum = r.wrongDate.reduce((s, d) => s + safeFloat(d.sale.price), 0);
+                const bazaNoDateSum = r.bazaNoDate.reduce((s, d) => s + safeFloat(d.sale.price), 0);
+                const dateAnomalySum = r.dateAnomaly.reduce((s, d) => s + safeFloat(d.sale.price), 0);
+                const issuesSum = wrongDateSum + bazaNoDateSum + dateAnomalySum;
+
+                let checkHint = '';
+                if (issuesSum > 0) checkHint = issuesSum;
+                else if (Math.abs(gap) > 0.01) {
+                    const toleranceSum = r.toleranceApplied.reduce((s, t) => s + safeFloat(t.sale.price), 0);
+                    if (toleranceSum > 0) checkHint = toleranceSum;
+                }
+
+                summaryData.push([
+                    r.month, r.soldTovar, r.soldBaza, r.expectedDiff, r.computedDiff, gap, checkHint,
+                    r.matched.length, r.toleranceApplied.length, r.wrongDate.length,
+                    r.dateAnomaly.length, r.bazaNoDate.length, r.potentialMatches.length,
+                    r.notFound.length, r.bazaUnmatched.length
+                ]);
+            }
+
+            const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+            XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+
+            // All Issues sheet
+            const issuesData = [
+                ['month', 'type', 'tovar_row', 'tovar_name', 'tovar_price_H', 'tovar_sell_date',
+                 'база_sheet', 'база_row', 'база_sell_date', 'issue']
+            ];
+
+            for (const issue of allIssues) {
+                issuesData.push([
+                    issue.month, issue.type, issue.tovarRow, issue.tovarName,
+                    safeFloat(issue.tovarPrice), issue.tovarSellDate,
+                    issue.bazaSheet, issue.bazaRow, issue.bazaSellDate, issue.issue
+                ]);
+            }
+
+            const wsIssues = XLSX.utils.aoa_to_sheet(issuesData);
+            XLSX.utils.book_append_sheet(wb, wsIssues, 'All Issues');
+
+            // Per-type sheets
+            const types = ['TOLERANCE', 'WRONG_DATE', 'DATE_ANOMALY', 'БАЗА_NO_DATE', 'POTENTIAL', 'NOT_FOUND', 'БАЗА_EXTRA'];
+            for (const type of types) {
+                const typeIssues = allIssues.filter(i => i.type === type);
+                if (!typeIssues.length) continue;
+
+                const typeData = [
+                    ['month', 'type', 'tovar_row', 'tovar_name', 'tovar_price_H', 'tovar_sell_date',
+                     'база_sheet', 'база_row', 'база_sell_date', 'issue']
+                ];
+
+                for (const issue of typeIssues) {
+                    typeData.push([
+                        issue.month, issue.type, issue.tovarRow, issue.tovarName,
+                        safeFloat(issue.tovarPrice), issue.tovarSellDate,
+                        issue.bazaSheet, issue.bazaRow, issue.bazaSellDate, issue.issue
+                    ]);
+                }
+
+                const wsType = XLSX.utils.aoa_to_sheet(typeData);
+                XLSX.utils.book_append_sheet(wb, wsType, type.substring(0, 31));
+            }
+
+            // Gap Items sheet
+            const gapData = [
+                ['Месяц', 'Тип', 'Лист', 'Строка', 'Название', 'Сумма H', 'Влияние', 'Остаток']
+            ];
+
+            for (const r of allResults) {
+                const expected = r.expectedDiff;
+                const computed = r.computedDiff;
+                const gap = expected - computed;
+
+                gapData.push([`=== ${r.month} ===`, '', '', '', `Ожидаемая разница: ${expected.toFixed(2)}`, '', '', '']);
+
+                let runningTotal = 0;
+
+                for (const s of r.notFound) {
+                    const price = safeFloat(s.price);
+                    runningTotal += price;
+                    gapData.push([
+                        r.month, 'tovar (не найдено)', 'tovar ' + r.month, s.row,
+                        s.name ? String(s.name).substring(0, 45) : '',
+                        price, `+${price.toFixed(2)}`, runningTotal.toFixed(2)
+                    ]);
+                }
+
+                for (const b of r.bazaUnmatched) {
+                    const price = safeFloat(b.price);
+                    runningTotal -= price;
+                    gapData.push([
+                        r.month, 'База (лишнее)', b.sheet, b.row,
+                        b.name ? String(b.name).substring(0, 45) : '',
+                        price, `-${price.toFixed(2)}`, runningTotal.toFixed(2)
+                    ]);
+                }
+
+                const notFoundSum = r.notFound.reduce((s, x) => s + safeFloat(x.price), 0);
+                const bazaSum = r.bazaUnmatched.reduce((s, x) => s + safeFloat(x.price), 0);
+
+                gapData.push([
+                    r.month, '>>> ИТОГО', '', '',
+                    `tovar: +${notFoundSum.toFixed(2)}, База: -${bazaSum.toFixed(2)}`,
+                    '', `= ${runningTotal.toFixed(2)}`, ''
+                ]);
+                gapData.push([
+                    '', '>>> СВЕРКА', '', '',
+                    `Ожидалось: ${expected.toFixed(2)}, Вычислено: ${runningTotal.toFixed(2)}`,
+                    '', `Разница (gap): ${gap.toFixed(2)}`, ''
+                ]);
+                gapData.push(['', '', '', '', '', '', '', '']);
+            }
+
+            const wsGap = XLSX.utils.aoa_to_sheet(gapData);
+            XLSX.utils.book_append_sheet(wb, wsGap, 'Gap Items');
+
+            // Download
+            XLSX.writeFile(wb, 'comparison_report.xlsx');
+        }
+    </script>
+</body>
+</html>
