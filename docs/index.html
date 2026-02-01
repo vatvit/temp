@@ -1149,11 +1149,16 @@
                     progressFill.style.width = `${10 + (processed / totalMonths) * 80}%`;
                 }
 
-                progressFill.style.width = '95%';
+                progressFill.style.width = '92%';
                 progressText.textContent = 'Формирование отчета...';
                 await new Promise(r => setTimeout(r, 50));
 
-                displayResults();
+                await displayResults((step, progress) => {
+                    // Map display steps to 92-100% range
+                    const baseProgress = 92 + (progress * 8);
+                    progressFill.style.width = `${baseProgress}%`;
+                    progressText.textContent = step;
+                });
 
                 progressFill.style.width = '100%';
                 progressText.textContent = 'Готово!';
@@ -1287,12 +1292,16 @@
             }
         }
 
-        function displayResults() {
-            // Summary table
+        async function displayResults(onProgress) {
+            // Step 1: Build summary table
+            if (onProgress) onProgress('Формирование сводки...', 0);
+            await new Promise(r => setTimeout(r, 0));
+
             const summaryBody = document.getElementById('summaryBody');
             summaryBody.innerHTML = '';
 
-            for (const r of allResults) {
+            for (let i = 0; i < allResults.length; i++) {
+                const r = allResults[i];
                 const gap = r.expectedDiff - r.computedDiff;
                 const wrongDateSum = r.wrongDate.reduce((s, d) => s + safeFloat(d.sale.price), 0);
                 const bazaNoDateSum = r.bazaNoDate.reduce((s, d) => s + safeFloat(d.sale.price), 0);
@@ -1330,9 +1339,17 @@
                         <td>${r.bazaUnmatched.length}</td>
                     </tr>
                 `;
+
+                // Yield to browser every few rows
+                if (i % 3 === 0) {
+                    await new Promise(r => setTimeout(r, 0));
+                }
             }
 
-            // Populate month filter
+            // Step 2: Populate month filter and badges
+            if (onProgress) onProgress('Обновление фильтров...', 0.3);
+            await new Promise(r => setTimeout(r, 0));
+
             const monthFilter = document.getElementById('monthFilter');
             monthFilter.innerHTML = '<option value="">Все месяцы</option>';
             for (const r of allResults) {
@@ -1348,8 +1365,15 @@
                 if (badge) badge.textContent = count;
             }
 
-            // Display details
-            displayDetails();
+            // Step 3: Display details (can be slow for large datasets)
+            if (onProgress) onProgress('Обработка деталей...', 0.5);
+            await new Promise(r => setTimeout(r, 0));
+
+            await displayDetailsAsync(onProgress);
+
+            // Step 4: Set up event handlers
+            if (onProgress) onProgress('Настройка интерфейса...', 0.9);
+            await new Promise(r => setTimeout(r, 0));
 
             // Set up tab handlers
             document.querySelectorAll('.tab').forEach(tab => {
@@ -1395,6 +1419,59 @@
                         <td title="${issue.issue}">${(issue.issue || '').substring(0, 50)}</td>
                     </tr>
                 `;
+            }
+        }
+
+        async function displayDetailsAsync(onProgress) {
+            const activeTab = document.querySelector('.tab.active').dataset.tab;
+            const selectedMonth = document.getElementById('monthFilter').value;
+
+            let filtered = allIssues;
+
+            if (activeTab !== 'all') {
+                filtered = filtered.filter(i => i.type === activeTab);
+            }
+
+            if (selectedMonth) {
+                filtered = filtered.filter(i => i.month === selectedMonth);
+            }
+
+            const detailsBody = document.getElementById('detailsBody');
+            detailsBody.innerHTML = '';
+
+            const total = filtered.length;
+            const BATCH_SIZE = 100;
+
+            // Process in batches to prevent UI freeze
+            for (let i = 0; i < total; i += BATCH_SIZE) {
+                const batch = filtered.slice(i, Math.min(i + BATCH_SIZE, total));
+                let html = '';
+
+                for (const issue of batch) {
+                    html += `
+                        <tr>
+                            <td>${issue.month}</td>
+                            <td><span class="type-badge type-${issue.type}">${issue.type}</span></td>
+                            <td>${issue.tovarRow}</td>
+                            <td title="${issue.tovarName || ''}">${(issue.tovarName || '').substring(0, 30)}</td>
+                            <td>${safeFloat(issue.tovarPrice).toFixed(2)}</td>
+                            <td>${issue.tovarSellDate}</td>
+                            <td>${issue.bazaSheet}</td>
+                            <td>${issue.bazaRow}</td>
+                            <td>${issue.bazaSellDate}</td>
+                            <td title="${issue.issue}">${(issue.issue || '').substring(0, 50)}</td>
+                        </tr>
+                    `;
+                }
+
+                detailsBody.innerHTML += html;
+
+                // Update progress and yield to browser
+                if (onProgress && total > BATCH_SIZE) {
+                    const progress = 0.5 + (Math.min(i + BATCH_SIZE, total) / total) * 0.4;
+                    onProgress(`Обработка деталей... ${Math.min(i + BATCH_SIZE, total)}/${total}`, progress);
+                }
+                await new Promise(r => setTimeout(r, 0));
             }
         }
 
