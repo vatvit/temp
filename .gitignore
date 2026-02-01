@@ -8,6 +8,10 @@ venv/
 # Output
 /output/
 
+# Data files (sensitive)
+*.xlsx
+*.xls
+
 # IDE
 .idea/
 .vscode/
