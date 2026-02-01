@@ -624,17 +624,13 @@ def save_combined_results(all_results):
         # Sum of all items that might explain the gap
         tolerance_sum = sum(safe_float(t['sale']['price']) for t in r['tolerance_applied'])
         issues_sum = wrong_date_sum + база_no_date_sum + date_anomaly_sum
-        not_found_sum = sum(safe_float(s['price']) for s in r['not_found'])
-        база_extra_sum = sum(safe_float(b['price']) for b in r['база_unmatched'])
 
-        # Build check_items - sum of items to check, priority order
+        # Build check_items - sum of items to check
+        # NOT_FOUND/БАЗА_EXTRA don't explain gap - they ARE the computed_diff
         if issues_sum > 0:
             check_hint = round(issues_sum, 2)
         elif abs(gap) > 0.01 and tolerance_sum > 0:
             check_hint = round(tolerance_sum, 2)
-        elif abs(gap) > 0.01:
-            # Show larger of NOT_FOUND or БАЗА_EXTRA
-            check_hint = round(max(not_found_sum, база_extra_sum), 2)
         else:
             check_hint = ''
 
