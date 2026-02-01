@@ -620,10 +620,10 @@ def save_combined_results(all_results):
         wrong_date_sum = sum(safe_float(d['sale']['price']) for d in r['wrong_date'])
         база_no_date_sum = sum(safe_float(d['sale']['price']) for d in r['база_no_date'])
         date_anomaly_sum = sum(safe_float(d['sale']['price']) for d in r['date_anomaly'])
-        potential_sum = sum(safe_float(p['sale']['price']) for p in r['potential_matches'])
 
-        # Sum of all issue items - compare with gap to see how much is explained
-        issues_sum = wrong_date_sum + база_no_date_sum + date_anomaly_sum + potential_sum
+        # Sum of matched items with date issues - compare with gap to see how much is explained
+        # Note: POTENTIAL is not included because those items are already counted above
+        issues_sum = wrong_date_sum + база_no_date_sum + date_anomaly_sum
 
         summary_rows.append({
             'month': r['month'],
