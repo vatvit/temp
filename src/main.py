@@ -620,21 +620,10 @@ def save_combined_results(all_results):
         wrong_date_sum = sum(safe_float(d['sale']['price']) for d in r['wrong_date'])
         база_no_date_sum = sum(safe_float(d['sale']['price']) for d in r['база_no_date'])
         date_anomaly_sum = sum(safe_float(d['sale']['price']) for d in r['date_anomaly'])
-        potential_count = len(r['potential_matches'])
+        potential_sum = sum(safe_float(p['sale']['price']) for p in r['potential_matches'])
 
-        # Build tip - БАЗА_NO_DATE and DATE_ANOMALY are likely causes of gaps
-        tip = ''
-        if abs(gap) > 0.01:
-            tip_parts = []
-            if база_no_date_sum > 0:
-                tip_parts.append(f'БАЗА_NO_DATE: {база_no_date_sum:.2f}')
-            if date_anomaly_sum > 0:
-                tip_parts.append(f'DATE_ANOMALY: {date_anomaly_sum:.2f}')
-            if wrong_date_sum > 0:
-                tip_parts.append(f'WRONG_DATE: {wrong_date_sum:.2f}')
-            if potential_count > 0:
-                tip_parts.append(f'POTENTIAL: {potential_count} поз.')
-            tip = ', '.join(tip_parts)
+        # Sum of all issue items - compare with gap to see how much is explained
+        issues_sum = wrong_date_sum + база_no_date_sum + date_anomaly_sum + potential_sum
 
         summary_rows.append({
             'month': r['month'],
@@ -643,7 +632,7 @@ def save_combined_results(all_results):
             'expected_diff': r['expected_diff'],
             'computed_diff': r['computed_diff'],
             'gap': gap,
-            'check_items': tip,
+            'check_items': round(issues_sum, 2) if issues_sum > 0 else '',
             'matched': len(r['matched']),
             'tolerance': len(r['tolerance_applied']),
             'wrong_date': len(r['wrong_date']),
@@ -805,7 +794,7 @@ def save_combined_results(all_results):
             "• expected_diff - ожидаемая разница (sold_tovar - sold_база)",
             "• computed_diff - вычисленная разница по позициям",
             "• gap - расхождение (если не 0, значит есть проблемы)",
-            "• check_items - подсказка что проверить для уменьшения gap",
+            "• check_items - сумма всех проблемных позиций (сравните с gap)",
             "• matched - сколько позиций совпало",
             "• tolerance - совпало с допуском (опечатки в году, прочерк вместо пустого и т.д.)",
             "• wrong_date - совпало, но дата продажи отличается (в пределах 1 мес.)",
