@@ -4,17 +4,22 @@
  * for the Excel comparison tool.
  *
  * Run with: docker run --rm -v "$(pwd)":/app -w /app node:20 node test/compare.js
+ * Debug mode: docker run --rm -v "$(pwd)":/app -w /app node:20 sh -c "npm install xlsx 2>/dev/null && node test/compare.js --debug"
  */
 
 const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 
+// Parse command line arguments
+const DEBUG_MODE = process.argv.includes('--debug');
+
 // Configuration
 const BASE_PATH = '/app';
 const FILE_TOVAR = path.join(BASE_PATH, 'tovar2025_PRN.xlsx');
 const FILE_BAZA = path.join(BASE_PATH, 'База товара_PRN.xls');
 const PYTHON_SUMMARY = path.join(BASE_PATH, 'output', 'comparison_summary.csv');
+const PYTHON_DETAILS = path.join(BASE_PATH, 'output', 'comparison_details.csv');
 
 // Month configuration
 const MONTHS = [
@@ -36,6 +41,52 @@ const MONTHS = [
 // Utility functions (extracted from index.html)
 // ============================================================================
 
+/**
+ * Normalize string for comparison: handles Cyrillic/Latin lookalikes,
+ * whitespace normalization, and case-insensitive matching.
+ *
+ * Cyrillic letters that look identical to Latin:
+ * А/A, В/B, С/C, Е/E, К/K, М/M, Н/H, О/O, Р/P, Т/T, Х/X, У/Y
+ *
+ * After toLowerCase(), uppercase Cyrillic becomes lowercase Cyrillic,
+ * so we only need lowercase mappings for the post-lowercase phase.
+ */
+const CYRILLIC_TO_LATIN_LOWER = {
+    // Lowercase Cyrillic -> lowercase Latin (applied after toLowerCase)
+    '\u0430': 'a',  // а -> a
+    '\u0432': 'b',  // в -> b (Cyrillic ve, visually similar to B/b in some fonts)
+    '\u0441': 'c',  // с -> c
+    '\u0435': 'e',  // е -> e
+    '\u043A': 'k',  // к -> k
+    '\u043C': 'm',  // м -> m
+    '\u043D': 'h',  // н -> h (Cyrillic en looks like H)
+    '\u043E': 'o',  // о -> o
+    '\u0440': 'p',  // р -> p (Cyrillic er looks like p)
+    '\u0442': 't',  // т -> t
+    '\u0445': 'x',  // х -> x
+    '\u0443': 'y',  // у -> y
+};
+
+function normalizeStringForComparison(str) {
+    if (str === null || str === undefined) return null;
+    if (typeof str !== 'string') return str;
+
+    // Convert to lowercase first (this also lowercases Cyrillic)
+    let result = str.toLowerCase();
+
+    // Replace Cyrillic lookalikes with Latin equivalents
+    result = result.split('').map(ch => CYRILLIC_TO_LATIN_LOWER[ch] || ch).join('');
+
+    // Normalize whitespace: trim and collapse multiple spaces
+    result = result.trim().replace(/\s+/g, ' ');
+
+    return result;
+}
+
+function stringsMatchNormalized(str1, str2) {
+    return normalizeStringForComparison(str1) === normalizeStringForComparison(str2);
+}
+
 function isNaN_or_null(val) {
     return val === null || val === undefined || (typeof val === 'number' && isNaN(val));
 }
@@ -47,13 +98,31 @@ function isEmptyEquivalent(val) {
     return false;
 }
 
+// Epsilon for floating-point comparisons (matches Python's round(v, 4) precision)
+const FLOAT_EPSILON = 0.00005;
+
 function normalizeValue(v) {
     if (v === null || v === undefined) return null;
     if (typeof v === 'number') {
         if (isNaN(v)) return null;
+        // Round to 4 decimal places (same as Python)
         return Math.round(v * 10000) / 10000;
     }
+    // Convert Date objects to timestamp for consistent comparison
+    if (isDate(v)) {
+        return v.getTime();
+    }
     return v;
+}
+
+function floatsEqual(a, b) {
+    // Compare two normalized values with epsilon tolerance for floats
+    if (a === b) return true;
+    if (a === null || b === null) return a === b;
+    if (typeof a === 'number' && typeof b === 'number') {
+        return Math.abs(a - b) < FLOAT_EPSILON;
+    }
+    return false;
 }
 
 function normalizeTuple(arr) {
@@ -103,12 +172,12 @@ function getSheetDataRaw(workbook, sheetName) {
 // ============================================================================
 
 function matchWithTolerance(saleKey, rowKey) {
-    // Check exact match first
+    // Check exact match first (using epsilon for floats)
     let exactMatch = true;
     for (let i = 0; i < 8; i++) {
         const s = normalizeValue(saleKey[i]);
         const r = normalizeValue(rowKey[i]);
-        if (s !== r && !(s === null && r === null)) {
+        if (!floatsEqual(s, r) && !(s === null && r === null)) {
             exactMatch = false;
             break;
         }
@@ -125,7 +194,8 @@ function matchWithTolerance(saleKey, rowKey) {
         const sn = normalizeValue(s);
         const rn = normalizeValue(r);
 
-        if (sn === rn) continue;
+        // Use epsilon comparison for floats
+        if (floatsEqual(sn, rn)) continue;
         if (sn === null && rn === null) continue;
 
         // Column B (index 1) - year typo in date
@@ -194,7 +264,8 @@ function getMismatches(saleKey, rowKey) {
         const r = rowKey[i];
         const sn = normalizeValue(s);
         const rn = normalizeValue(r);
-        if (sn === rn) continue;
+        // Use epsilon comparison for floats
+        if (floatsEqual(sn, rn)) continue;
         if (sn === null && rn === null) continue;
         if (isEmptyEquivalent(s) && isEmptyEquivalent(r)) continue;
         mismatches.push(`${cols[i]}:${formatVal(s)}vs${formatVal(r)}`);
@@ -271,6 +342,7 @@ function getMonthDifference(workbook, colIdx) {
 
 function findInBaza(sale, bazaSheets) {
     const name = sale.name;
+    const normalizedName = normalizeStringForComparison(name);
     const saleKey = normalizeTuple(sale.colsAH);
     const tovarDate = sale.sellDate;
     const matches = [];
@@ -278,7 +350,7 @@ function findInBaza(sale, bazaSheets) {
     for (const [sheetName, data] of Object.entries(bazaSheets)) {
         for (let idx = 0; idx < data.length; idx++) {
             const row = data[idx];
-            if (row[0] !== name) continue;
+            if (normalizeStringForComparison(row[0]) !== normalizedName) continue;
 
             const rowKey = normalizeTuple(row.slice(0, 8));
             const result = matchWithTolerance(saleKey, rowKey);
@@ -305,6 +377,7 @@ function findInBaza(sale, bazaSheets) {
 
 function findPotentialMatches(sale, bazaSheets) {
     const name = sale.name;
+    const normalizedName = normalizeStringForComparison(name);
     const sellDate = sale.sellDate;
     const saleKey = normalizeTuple(sale.colsAH);
     const potentials = [];
@@ -312,7 +385,7 @@ function findPotentialMatches(sale, bazaSheets) {
     for (const [sheetName, data] of Object.entries(bazaSheets)) {
         for (let idx = 0; idx < data.length; idx++) {
             const row = data[idx];
-            if (row[0] !== name) continue;
+            if (normalizeStringForComparison(row[0]) !== normalizedName) continue;
 
             const rowSellDate = row[21];
             const dateResult = checkDateMatch(sellDate, rowSellDate);
@@ -515,6 +588,453 @@ function parsePythonSummary(csvPath) {
         results.push(row);
     }
     return results;
+}
+
+/**
+ * Parse Python details CSV with proper CSV handling for quoted fields
+ */
+function parsePythonDetails(csvPath) {
+    if (!fs.existsSync(csvPath)) {
+        console.warn(`WARNING: Python details file not found: ${csvPath}`);
+        return [];
+    }
+
+    const content = fs.readFileSync(csvPath, 'utf-8');
+    const lines = content.trim().split('\n');
+
+    // Parse header
+    const headers = lines[0].split(',');
+
+    const results = [];
+    for (let i = 1; i < lines.length; i++) {
+        const row = parseCSVLine(lines[i], headers);
+        if (row) {
+            results.push(row);
+        }
+    }
+    return results;
+}
+
+/**
+ * Parse a single CSV line, handling quoted fields with commas
+ */
+function parseCSVLine(line, headers) {
+    const values = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+            inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+            values.push(current);
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+    values.push(current); // Last field
+
+    const row = {};
+    for (let j = 0; j < headers.length; j++) {
+        row[headers[j]] = values[j] || '';
+    }
+    return row;
+}
+
+// ============================================================================
+// Generate JS issues list (similar to Python details)
+// ============================================================================
+
+/**
+ * Convert JS processing results to a flat issues list comparable to Python's details
+ */
+function generateJSIssuesList(jsResults) {
+    const issues = [];
+
+    for (const result of jsResults) {
+        const month = result.month;
+
+        // TOLERANCE issues
+        for (const item of result.toleranceApplied) {
+            issues.push({
+                month,
+                type: 'TOLERANCE',
+                tovar_row: item.sale.row,
+                tovar_name: item.sale.name,
+                tovar_price_H: item.sale.price,
+                tovar_sell_date: formatDate(item.sale.sellDate),
+                baza_sheet: item.baza.sheet,
+                baza_row: item.baza.row,
+                baza_sell_date: formatDate(item.baza.sellDate),
+                issue: item.tolerances.join(', ')
+            });
+        }
+
+        // WRONG_DATE issues
+        for (const item of result.wrongDate) {
+            issues.push({
+                month,
+                type: 'WRONG_DATE',
+                tovar_row: item.sale.row,
+                tovar_name: item.sale.name,
+                tovar_price_H: item.sale.price,
+                tovar_sell_date: formatDate(item.tovarDate),
+                baza_sheet: item.baza ? item.baza.sheet : '',
+                baza_row: item.baza ? item.baza.row : '',
+                baza_sell_date: item.bazaDate === 'ALL_USED' ? 'ALL_USED' : formatDate(item.baza ? item.baza.sellDate : null),
+                issue: `tovar:${formatDate(item.tovarDate)} vs baza:${item.bazaDate === 'ALL_USED' ? 'ALL_USED' : formatDate(item.baza ? item.baza.sellDate : null)}`
+            });
+        }
+
+        // DATE_ANOMALY issues
+        for (const item of result.dateAnomaly) {
+            issues.push({
+                month,
+                type: 'DATE_ANOMALY',
+                tovar_row: item.sale.row,
+                tovar_name: item.sale.name,
+                tovar_price_H: item.sale.price,
+                tovar_sell_date: formatDate(item.tovarDate),
+                baza_sheet: item.baza.sheet,
+                baza_row: item.baza.row,
+                baza_sell_date: formatDate(item.bazaDate),
+                issue: `${item.monthsApart} months apart: tovar:${formatDate(item.tovarDate)} vs baza:${formatDate(item.bazaDate)}`
+            });
+        }
+
+        // NOT_FOUND issues
+        for (const item of result.notFound) {
+            issues.push({
+                month,
+                type: 'NOT_FOUND',
+                tovar_row: item.row,
+                tovar_name: item.name,
+                tovar_price_H: item.price,
+                tovar_sell_date: formatDate(item.sellDate),
+                baza_sheet: '',
+                baza_row: '',
+                baza_sell_date: '',
+                issue: 'Not found in baza'
+            });
+        }
+
+        // BAZA_EXTRA issues
+        for (const item of result.bazaUnmatched) {
+            issues.push({
+                month,
+                type: 'BAZA_EXTRA',
+                tovar_row: '',
+                tovar_name: '',
+                tovar_price_H: '',
+                tovar_sell_date: '',
+                baza_sheet: item.sheet,
+                baza_row: item.row,
+                baza_sell_date: formatDate(item.date),
+                issue: `${item.name} H=${item.price}`
+            });
+        }
+
+        // POTENTIAL issues
+        for (const item of result.potentialMatches) {
+            issues.push({
+                month,
+                type: 'POTENTIAL',
+                tovar_row: item.sale.row,
+                tovar_name: item.sale.name,
+                tovar_price_H: item.sale.price,
+                tovar_sell_date: formatDate(item.sale.sellDate),
+                baza_sheet: item.baza.sheet,
+                baza_row: item.baza.row,
+                baza_sell_date: formatDate(item.baza.sellDate),
+                issue: item.mismatches.join(', ')
+            });
+        }
+    }
+
+    return issues;
+}
+
+/**
+ * Create a unique key for an issue to enable comparison
+ */
+function issueKey(issue) {
+    // Normalize type name (Python uses БАЗА_EXTRA, JS uses BAZA_EXTRA)
+    const type = issue.type.replace('БАЗА', 'BAZA');
+
+    // For BAZA_EXTRA, use baza coordinates
+    if (type === 'BAZA_EXTRA') {
+        const sheet = issue.baza_sheet || issue['база_sheet'] || '';
+        const row = issue.baza_row || issue['база_row'] || '';
+        return `${issue.month}|${type}|${sheet}|${row}`;
+    }
+    // For others, use tovar coordinates
+    return `${issue.month}|${type}|${issue.tovar_row}|${issue.tovar_name}`;
+}
+
+/**
+ * Create a more relaxed key for fuzzy matching (just month/type/row)
+ */
+function issueKeyRelaxed(issue) {
+    const type = issue.type.replace('БАЗА', 'BAZA');
+    if (type === 'BAZA_EXTRA') {
+        const sheet = issue.baza_sheet || issue['база_sheet'] || '';
+        const row = issue.baza_row || issue['база_row'] || '';
+        return `${issue.month}|${type}|${sheet}|${row}`;
+    }
+    return `${issue.month}|${type}|${issue.tovar_row}`;
+}
+
+/**
+ * Normalize Python issue to match JS field names
+ */
+function normalizePythonIssue(pyIssue) {
+    return {
+        month: pyIssue.month,
+        type: pyIssue.type.replace('БАЗА', 'BAZA'),
+        tovar_row: pyIssue.tovar_row,
+        tovar_name: pyIssue.tovar_name,
+        tovar_price_H: pyIssue.tovar_price_H,
+        tovar_sell_date: pyIssue.tovar_sell_date,
+        baza_sheet: pyIssue['база_sheet'] || '',
+        baza_row: pyIssue['база_row'] || '',
+        baza_sell_date: pyIssue['база_sell_date'] || '',
+        issue: pyIssue.issue
+    };
+}
+
+/**
+ * Compare Python and JS issues lists
+ */
+function compareIssuesLists(pyIssues, jsIssues) {
+    const pyByKey = new Map();
+    const jsByKey = new Map();
+
+    // Normalize Python issues and group by key
+    for (const issue of pyIssues) {
+        const normalized = normalizePythonIssue(issue);
+        const key = issueKey(normalized);
+        if (!pyByKey.has(key)) {
+            pyByKey.set(key, []);
+        }
+        pyByKey.get(key).push(normalized);
+    }
+
+    for (const issue of jsIssues) {
+        const key = issueKey(issue);
+        if (!jsByKey.has(key)) {
+            jsByKey.set(key, []);
+        }
+        jsByKey.get(key).push(issue);
+    }
+
+    const onlyInPython = [];
+    const onlyInJS = [];
+    const matched = [];
+    const valueDifferences = [];
+
+    // Find items only in Python
+    for (const [key, pyItems] of pyByKey) {
+        const jsItems = jsByKey.get(key) || [];
+        if (jsItems.length === 0) {
+            onlyInPython.push(...pyItems);
+        } else {
+            // Compare values
+            for (let i = 0; i < pyItems.length; i++) {
+                if (i < jsItems.length) {
+                    matched.push({ py: pyItems[i], js: jsItems[i] });
+                    const diffs = compareIssueValues(pyItems[i], jsItems[i]);
+                    if (diffs.length > 0) {
+                        valueDifferences.push({ py: pyItems[i], js: jsItems[i], diffs });
+                    }
+                } else {
+                    onlyInPython.push(pyItems[i]);
+                }
+            }
+        }
+    }
+
+    // Find items only in JS
+    for (const [key, jsItems] of jsByKey) {
+        const pyItems = pyByKey.get(key) || [];
+        if (pyItems.length === 0) {
+            onlyInJS.push(...jsItems);
+        } else if (jsItems.length > pyItems.length) {
+            // Extra items in JS beyond what Python has
+            for (let i = pyItems.length; i < jsItems.length; i++) {
+                onlyInJS.push(jsItems[i]);
+            }
+        }
+    }
+
+    return { onlyInPython, onlyInJS, matched, valueDifferences };
+}
+
+/**
+ * Compare values between a Python and JS issue
+ */
+function compareIssueValues(pyIssue, jsIssue) {
+    const diffs = [];
+    const fields = ['tovar_row', 'tovar_name', 'tovar_price_H', 'tovar_sell_date',
+                    'baza_sheet', 'baza_row', 'baza_sell_date'];
+
+    for (const field of fields) {
+        const pyVal = String(pyIssue[field] || '');
+        const jsVal = String(jsIssue[field] || '');
+
+        // Normalize values for comparison
+        const pyNorm = normalizeCompareValue(pyVal);
+        const jsNorm = normalizeCompareValue(jsVal);
+
+        if (pyNorm !== jsNorm) {
+            diffs.push({ field, python: pyVal, javascript: jsVal });
+        }
+    }
+
+    return diffs;
+}
+
+/**
+ * Normalize a value for comparison
+ */
+function normalizeCompareValue(val) {
+    if (!val || val === '' || val === 'undefined' || val === 'null') return '';
+    // Remove trailing zeros from numbers
+    const numMatch = val.match(/^(\d+\.\d*?)0+$/);
+    if (numMatch) return numMatch[1].replace(/\.$/, '');
+    return val;
+}
+
+/**
+ * Print detailed debug report
+ */
+function printDebugReport(comparison, pyIssues, jsIssues) {
+    console.log('\n' + '='.repeat(100));
+    console.log('DETAILED DEBUG REPORT - Python vs JavaScript Issues Comparison');
+    console.log('='.repeat(100));
+
+    // Summary by type
+    console.log('\n--- ISSUES COUNT BY TYPE ---');
+    const pyByType = {};
+    const jsByType = {};
+
+    for (const issue of pyIssues) {
+        const type = issue.type.replace('БАЗА', 'BAZA');
+        pyByType[type] = (pyByType[type] || 0) + 1;
+    }
+    for (const issue of jsIssues) {
+        jsByType[issue.type] = (jsByType[issue.type] || 0) + 1;
+    }
+
+    const allTypes = new Set([...Object.keys(pyByType), ...Object.keys(jsByType)]);
+    console.log(padRight('Type', 20) + padRight('Python', 12) + padRight('JavaScript', 12) + 'Diff');
+    console.log('-'.repeat(60));
+    for (const type of allTypes) {
+        const pyCount = pyByType[type] || 0;
+        const jsCount = jsByType[type] || 0;
+        const diff = jsCount - pyCount;
+        console.log(
+            padRight(type, 20) +
+            padRight(String(pyCount), 12) +
+            padRight(String(jsCount), 12) +
+            (diff === 0 ? 'OK' : `${diff > 0 ? '+' : ''}${diff}`)
+        );
+    }
+
+    // Items only in Python
+    if (comparison.onlyInPython.length > 0) {
+        console.log('\n' + '='.repeat(100));
+        console.log(`ITEMS ONLY IN PYTHON (${comparison.onlyInPython.length} items)`);
+        console.log('These items are in Python output but NOT found in JavaScript output');
+        console.log('='.repeat(100));
+
+        // Group by month and type
+        const grouped = groupByMonthAndType(comparison.onlyInPython);
+        for (const [monthType, items] of grouped) {
+            console.log(`\n--- ${monthType} ---`);
+            for (const item of items) {
+                printIssueDetail(item, 'Python');
+            }
+        }
+    }
+
+    // Items only in JS
+    if (comparison.onlyInJS.length > 0) {
+        console.log('\n' + '='.repeat(100));
+        console.log(`ITEMS ONLY IN JAVASCRIPT (${comparison.onlyInJS.length} items)`);
+        console.log('These items are in JavaScript output but NOT found in Python output');
+        console.log('='.repeat(100));
+
+        const grouped = groupByMonthAndType(comparison.onlyInJS);
+        for (const [monthType, items] of grouped) {
+            console.log(`\n--- ${monthType} ---`);
+            for (const item of items) {
+                printIssueDetail(item, 'JavaScript');
+            }
+        }
+    }
+
+    // Value differences
+    if (comparison.valueDifferences.length > 0) {
+        console.log('\n' + '='.repeat(100));
+        console.log(`VALUE DIFFERENCES (${comparison.valueDifferences.length} items)`);
+        console.log('These items exist in both but have different values');
+        console.log('='.repeat(100));
+
+        for (const diff of comparison.valueDifferences) {
+            console.log(`\n${diff.py.month} | ${diff.py.type} | Row ${diff.py.tovar_row}`);
+            console.log(`  Name: ${diff.py.tovar_name}`);
+            for (const d of diff.diffs) {
+                console.log(`  ${d.field}:`);
+                console.log(`    Python:     "${d.python}"`);
+                console.log(`    JavaScript: "${d.javascript}"`);
+            }
+        }
+    }
+
+    // Summary
+    console.log('\n' + '='.repeat(100));
+    console.log('DEBUG SUMMARY');
+    console.log('='.repeat(100));
+    console.log(`Total Python issues:     ${pyIssues.length}`);
+    console.log(`Total JavaScript issues: ${jsIssues.length}`);
+    console.log(`Matched issues:          ${comparison.matched.length}`);
+    console.log(`Only in Python:          ${comparison.onlyInPython.length}`);
+    console.log(`Only in JavaScript:      ${comparison.onlyInJS.length}`);
+    console.log(`With value differences:  ${comparison.valueDifferences.length}`);
+}
+
+/**
+ * Group issues by month and type
+ */
+function groupByMonthAndType(issues) {
+    const groups = new Map();
+    for (const issue of issues) {
+        const key = `${issue.month} / ${issue.type}`;
+        if (!groups.has(key)) {
+            groups.set(key, []);
+        }
+        groups.get(key).push(issue);
+    }
+    return groups;
+}
+
+/**
+ * Print a single issue in detail
+ */
+function printIssueDetail(issue, source) {
+    if (issue.type === 'BAZA_EXTRA') {
+        console.log(`  [${source}] baza: ${issue.baza_sheet} row ${issue.baza_row}, date: ${issue.baza_sell_date}`);
+        console.log(`    Issue: ${issue.issue}`);
+    } else {
+        console.log(`  [${source}] tovar row ${issue.tovar_row}: ${issue.tovar_name}`);
+        console.log(`    Price H: ${issue.tovar_price_H}, Sell date: ${issue.tovar_sell_date}`);
+        if (issue.baza_sheet) {
+            console.log(`    baza: ${issue.baza_sheet} row ${issue.baza_row}, date: ${issue.baza_sell_date}`);
+        }
+        console.log(`    Issue: ${issue.issue}`);
+    }
 }
 
 // ============================================================================
@@ -746,6 +1266,27 @@ function main() {
     // Compare and report
     const comparison = compareResults(jsResults, pyResults);
     const success = printComparisonReport(comparison);
+
+    // Debug mode: detailed item-by-item comparison
+    if (DEBUG_MODE) {
+        console.log('\n' + '='.repeat(100));
+        console.log('DEBUG MODE ENABLED - Loading detailed comparison');
+        console.log('='.repeat(100));
+
+        // Load Python details
+        const pyDetails = parsePythonDetails(PYTHON_DETAILS);
+        console.log(`Loaded ${pyDetails.length} detailed issues from Python`);
+
+        // Generate JS issues list
+        const jsIssues = generateJSIssuesList(jsResults);
+        console.log(`Generated ${jsIssues.length} detailed issues from JavaScript`);
+
+        // Compare issues lists
+        const issuesComparison = compareIssuesLists(pyDetails, jsIssues);
+
+        // Print detailed debug report
+        printDebugReport(issuesComparison, pyDetails, jsIssues);
+    }
 
     process.exit(success ? 0 : 1);
 }

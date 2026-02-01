@@ -635,6 +635,53 @@
         btnDownload.addEventListener('click', downloadExcel);
 
         // Utility functions
+
+        /**
+         * Normalize string for comparison: handles Cyrillic/Latin lookalikes,
+         * whitespace normalization, and case-insensitive matching.
+         *
+         * Cyrillic letters that look identical to Latin:
+         * А/A, В/B, С/C, Е/E, К/K, М/M, Н/H, О/O, Р/P, Т/T, Х/X, У/Y
+         *
+         * After toLowerCase(), uppercase Cyrillic becomes lowercase Cyrillic,
+         * so we only need lowercase mappings for the post-lowercase phase.
+         */
+        const CYRILLIC_TO_LATIN_LOWER = {
+            // Lowercase Cyrillic -> lowercase Latin (applied after toLowerCase)
+            '\u0430': 'a',  // а -> a
+            '\u0432': 'b',  // в -> b (Cyrillic ve, visually similar to B/b in some fonts)
+            '\u0441': 'c',  // с -> c
+            '\u0435': 'e',  // е -> e
+            '\u043A': 'k',  // к -> k
+            '\u043C': 'm',  // м -> m
+            '\u043D': 'h',  // н -> h (Cyrillic en looks like H)
+            '\u043E': 'o',  // о -> o
+            '\u0440': 'p',  // р -> p (Cyrillic er looks like p)
+            '\u0442': 't',  // т -> t
+            '\u0445': 'x',  // х -> x
+            '\u0443': 'y',  // у -> y
+        };
+
+        function normalizeStringForComparison(str) {
+            if (str === null || str === undefined) return null;
+            if (typeof str !== 'string') return str;
+
+            // Convert to lowercase first (this also lowercases Cyrillic)
+            let result = str.toLowerCase();
+
+            // Replace Cyrillic lookalikes with Latin equivalents
+            result = result.split('').map(ch => CYRILLIC_TO_LATIN_LOWER[ch] || ch).join('');
+
+            // Normalize whitespace: trim and collapse multiple spaces
+            result = result.trim().replace(/\s+/g, ' ');
+
+            return result;
+        }
+
+        function stringsMatchNormalized(str1, str2) {
+            return normalizeStringForComparison(str1) === normalizeStringForComparison(str2);
+        }
+
         function isNaN_or_null(val) {
             return val === null || val === undefined || (typeof val === 'number' && isNaN(val));
         }
@@ -646,13 +693,31 @@
             return false;
         }
 
+        // Epsilon for floating-point comparisons (matches Python's round(v, 4) precision)
+        const FLOAT_EPSILON = 0.00005;
+
         function normalizeValue(v) {
             if (v === null || v === undefined) return null;
             if (typeof v === 'number') {
                 if (isNaN(v)) return null;
+                // Round to 4 decimal places (same as Python)
                 return Math.round(v * 10000) / 10000;
             }
+            // Convert Date objects to timestamp for consistent comparison
+            if (isDate(v)) {
+                return v.getTime();
+            }
             return v;
+        }
+
+        function floatsEqual(a, b) {
+            // Compare two normalized values with epsilon tolerance for floats
+            if (a === b) return true;
+            if (a === null || b === null) return a === b;
+            if (typeof a === 'number' && typeof b === 'number') {
+                return Math.abs(a - b) < FLOAT_EPSILON;
+            }
+            return false;
         }
 
         function normalizeTuple(arr) {
@@ -706,12 +771,12 @@
 
         // Match with tolerance (columns A-H)
         function matchWithTolerance(saleKey, rowKey) {
-            // Check exact match first
+            // Check exact match first (using epsilon for floats)
             let exactMatch = true;
             for (let i = 0; i < 8; i++) {
                 const s = normalizeValue(saleKey[i]);
                 const r = normalizeValue(rowKey[i]);
-                if (s !== r && !(s === null && r === null)) {
+                if (!floatsEqual(s, r) && !(s === null && r === null)) {
                     exactMatch = false;
                     break;
                 }
@@ -728,7 +793,8 @@
                 const sn = normalizeValue(s);
                 const rn = normalizeValue(r);
 
-                if (sn === rn) continue;
+                // Use epsilon comparison for floats
+                if (floatsEqual(sn, rn)) continue;
                 if (sn === null && rn === null) continue;
 
                 // Column B (index 1) - year typo in date
@@ -800,7 +866,8 @@
                 const r = rowKey[i];
                 const sn = normalizeValue(s);
                 const rn = normalizeValue(r);
-                if (sn === rn) continue;
+                // Use epsilon comparison for floats
+                if (floatsEqual(sn, rn)) continue;
                 if (sn === null && rn === null) continue;
                 if (isEmptyEquivalent(s) && isEmptyEquivalent(r)) continue;
                 mismatches.push(`${cols[i]}:${formatVal(s)}vs${formatVal(r)}`);
@@ -873,6 +940,7 @@
         // Find in база
         function findInBaza(sale, bazaSheets) {
             const name = sale.name;
+            const normalizedName = normalizeStringForComparison(name);
             const saleKey = normalizeTuple(sale.colsAH);
             const tovarDate = sale.sellDate;
             const matches = [];
@@ -880,7 +948,7 @@
             for (const [sheetName, data] of Object.entries(bazaSheets)) {
                 for (let idx = 0; idx < data.length; idx++) {
                     const row = data[idx];
-                    if (row[0] !== name) continue;
+                    if (normalizeStringForComparison(row[0]) !== normalizedName) continue;
 
                     const rowKey = normalizeTuple(row.slice(0, 8));
                     const result = matchWithTolerance(saleKey, rowKey);
@@ -908,6 +976,7 @@
         // Find potential matches
         function findPotentialMatches(sale, bazaSheets) {
             const name = sale.name;
+            const normalizedName = normalizeStringForComparison(name);
             const sellDate = sale.sellDate;
             const saleKey = normalizeTuple(sale.colsAH);
             const potentials = [];
@@ -915,7 +984,7 @@
             for (const [sheetName, data] of Object.entries(bazaSheets)) {
                 for (let idx = 0; idx < data.length; idx++) {
                     const row = data[idx];
-                    if (row[0] !== name) continue;
+                    if (normalizeStringForComparison(row[0]) !== normalizedName) continue;
 
                     const rowSellDate = row[21];
                     const dateResult = checkDateMatch(sellDate, rowSellDate);
